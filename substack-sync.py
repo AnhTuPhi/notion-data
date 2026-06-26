@@ -1,48 +1,124 @@
-import feedparser
 import os
+import requests
+import feedparser
 
 from notion_client import Client
 from datetime import datetime
 
 
 RSS_URLS = [
-    "https://bachhoavienvong.substack.com/feed"
+    "https://newsletter.pragmaticengineer.com/feed",
+    "https://bachhoavienvong.substack.com/feed",
 ]
 
 
 DATABASE_ID = os.environ["DATABASE_ID"]
 
+NOTION_TOKEN = os.environ["NOTION_TOKEN"]
+
+
 notion = Client(
-    auth=os.environ["NOTION_TOKEN"]
+    auth=NOTION_TOKEN
 )
 
 
 SYNC_FILE = "synced_posts.txt"
 
 
-# Load already synced URLs
+# =========================
+# Load synced URLs
+# =========================
+
 if os.path.exists(SYNC_FILE):
 
-    with open(SYNC_FILE, "r") as f:
+    with open(SYNC_FILE, "r", encoding="utf-8") as f:
+
         synced_posts = set(
-            line.strip()
-            for line in f.readlines()
+            x.strip()
+            for x in f.readlines()
         )
 
 else:
+
     synced_posts = set()
 
 
 
+# =========================
+# Fetch RSS
+# =========================
+
+def fetch_feed(url):
+
+    print("Fetching RSS:", url)
+
+
+    headers = {
+
+        "User-Agent":
+        "Mozilla/5.0 (X11; Linux x86_64)",
+
+        "Accept":
+        "application/rss+xml, application/xml, text/xml"
+
+    }
+
+
+    response = requests.get(
+
+        url,
+
+        headers=headers,
+
+        timeout=30
+
+    )
+
+
+    print(
+        "HTTP:",
+        response.status_code
+    )
+
+
+    print(
+        "Content:",
+        response.text[:100]
+    )
+
+
+    return feedparser.parse(
+        response.content
+    )
+
+
+
+# =========================
+# Create Notion Page
+# =========================
+
 def create_post(post, source):
 
-    print("Creating:", post.title)
+
+    print(
+        "Creating:",
+        post.title
+    )
+
+
+    published = post.get(
+        "published",
+        datetime.now().isoformat()
+    )
 
 
     notion.pages.create(
 
         parent={
-            "database_id": DATABASE_ID
+
+            "database_id":
+            DATABASE_ID
+
         },
 
 
@@ -54,9 +130,14 @@ def create_post(post, source):
                 "title": [
 
                     {
+
                         "text": {
-                            "content": post.title
+
+                            "content":
+                            post.title
+
                         }
+
                     }
 
                 ]
@@ -66,7 +147,8 @@ def create_post(post, source):
 
             "URL": {
 
-                "url": post.link
+                "url":
+                post.link
 
             },
 
@@ -76,7 +158,7 @@ def create_post(post, source):
                 "date": {
 
                     "start":
-                    datetime.now().isoformat()
+                    published
 
                 }
 
@@ -85,11 +167,20 @@ def create_post(post, source):
 
             "Source": {
 
-                "select": {
+                "rich_text": [
 
-                    "name": source
+                    {
 
-                }
+                        "text": {
+
+                            "content":
+                            source
+
+                        }
+
+                    }
+
+                ]
 
             }
 
@@ -101,9 +192,11 @@ def create_post(post, source):
 
             {
 
-                "object": "block",
+                "object":
+                "block",
 
-                "type": "paragraph",
+                "type":
+                "paragraph",
 
                 "paragraph": {
 
@@ -135,18 +228,18 @@ def create_post(post, source):
 
 
 
+# =========================
+# Main sync
+# =========================
+
+
 for rss_url in RSS_URLS:
 
 
     print("====================")
 
-    print(
-        "Fetching:",
-        rss_url
-    )
 
-
-    feed = feedparser.parse(
+    feed = fetch_feed(
         rss_url
     )
 
@@ -156,11 +249,20 @@ for rss_url in RSS_URLS:
         len(feed.entries)
     )
 
-    print(feed.bozo)
-    print(feed.bozo_exception)
-    print(feed.feed)
 
-    print(feed.entries)
+    print(
+        "Feed error:",
+        feed.bozo
+    )
+
+
+    if feed.bozo:
+
+        print(
+            feed.bozo_exception
+        )
+
+
 
     for post in feed.entries:
 
@@ -175,7 +277,7 @@ for rss_url in RSS_URLS:
 
 
             print(
-                "Already synced:",
+                "Skip:",
                 post.title
             )
 
@@ -184,6 +286,7 @@ for rss_url in RSS_URLS:
 
 
         try:
+
 
             create_post(
                 post,
@@ -204,6 +307,7 @@ for rss_url in RSS_URLS:
 
         except Exception as e:
 
+
             print(
                 "ERROR:",
                 e
@@ -211,11 +315,15 @@ for rss_url in RSS_URLS:
 
 
 
+# =========================
 # Save state
+# =========================
+
 
 with open(
     SYNC_FILE,
-    "w"
+    "w",
+    encoding="utf-8"
 ) as f:
 
 
@@ -228,4 +336,7 @@ with open(
         )
 
 
-print("Sync completed")
+
+print(
+    "Sync completed"
+)
