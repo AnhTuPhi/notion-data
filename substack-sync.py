@@ -6,8 +6,7 @@ from datetime import datetime
 
 
 RSS_URLS = [
-    "https://newsletter.pragmaticengineer.com/feed",
-    "https://thealgorithm.substack.com/feed",
+    "https://bachhoavienvong.substack.com/feed"
 ]
 
 
