@@ -156,7 +156,11 @@ for rss_url in RSS_URLS:
         len(feed.entries)
     )
 
+    print(feed.bozo)
+    print(feed.bozo_exception)
+    print(feed.feed)
 
+    print(feed.entries)
 
     for post in feed.entries:
 
