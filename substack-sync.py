@@ -8,8 +8,11 @@ from email.utils import parsedate_to_datetime
 
 
 RSS_URLS = [
-    "https://newsletter.pragmaticengineer.com/feed",
+    "https://blackswain.substack.com/feed",
     "https://bachhoavienvong.substack.com/feed",
+    "https://zoedatalens.substack.com/feed",
+    "https://vohoanghac.com/feed",
+    "https://cyclegatekeeper.substack.com/feed",
 ]
 
 
