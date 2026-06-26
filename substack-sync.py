@@ -1,14 +1,21 @@
 import feedparser
 import os
+
 from notion_client import Client
 from datetime import datetime
 
 
-RSS_URL = "https://bachhoavienvong.substack.com/feed"
+RSS_URLS = [
+    "https://newsletter.pragmaticengineer.com/feed",
+    "https://thealgorithm.substack.com/feed",
+    "https://bachhoavienvong.substack.com/feed"
+]
+
 
 notion = Client(
     auth=os.environ["NOTION_TOKEN"]
 )
+
 
 DATABASE_ID = os.environ["DATABASE_ID"]
 
@@ -29,65 +36,87 @@ def exists(url):
 
 
 
-def create_post(post):
+def create_post(post, source):
+
+    print("Creating:", post.title)
 
     notion.pages.create(
+
         parent={
             "database_id": DATABASE_ID
         },
 
         properties={
 
-            "Title":{
-                "title":[
+            "Title": {
+                "title": [
                     {
-                        "text":{
-                            "content":post.title
+                        "text": {
+                            "content": post.title
                         }
                     }
                 ]
             },
 
-            "URL":{
-                "url":post.link
+
+            "URL": {
+                "url": post.link
             },
 
-            "Published":{
-                "date":{
-                    "start":datetime.now().isoformat()
+
+            "Published": {
+                "date": {
+                    "start": datetime.now().isoformat()
+                }
+            },
+
+
+            "Source": {
+                "select": {
+                    "name": source
                 }
             }
 
-        },
-
-
-        children=[
-
-            {
-                "object":"block",
-                "type":"paragraph",
-
-                "paragraph":{
-                    "rich_text":[
-                        {
-                            "text":{
-                                "content":
-                                post.summary[:1800]
-                            }
-                        }
-                    ]
-                }
-            }
-
-        ]
+        }
     )
 
 
-feed = feedparser.parse(RSS_URL)
+
+for rss_url in RSS_URLS:
+
+    print("====================")
+    print("Fetching:", rss_url)
 
 
-for post in feed.entries:
-    if exists(post.link):
-        continue
-    print("Sync:", post.title)
-    create_post(post)
+    feed = feedparser.parse(rss_url)
+
+
+    print(
+        "Found posts:",
+        len(feed.entries)
+    )
+
+
+    for post in feed.entries:
+
+
+        print(
+            "Checking:",
+            post.title
+        )
+
+
+        if exists(post.link):
+
+            print(
+                "Skip existing:",
+                post.title
+            )
+
+            continue
+
+
+        create_post(
+            post,
+            rss_url
+        )
