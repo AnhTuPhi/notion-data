@@ -99,7 +99,7 @@ def convert_date(post):
 
 
 
-def create_post(post, source):
+def create_post(post):
 
 
     published = convert_date(post)
@@ -154,26 +154,7 @@ def create_post(post, source):
 
                 }
 
-            },
-
-
-            "Source": {
-
-                "rich_text": [
-
-                    {
-                        "text": {
-
-                            "content":
-                            source
-
-                        }
-                    }
-
-                ]
-
             }
-
         }
 
     )
@@ -223,8 +204,7 @@ for rss_url in RSS_URLS:
         try:
 
             create_post(
-                post,
-                rss_url
+                post
             )
 
 
