@@ -4,6 +4,7 @@ import feedparser
 
 from notion_client import Client
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 
 RSS_URLS = [
@@ -14,77 +15,56 @@ RSS_URLS = [
 
 DATABASE_ID = os.environ["DATABASE_ID"]
 
-NOTION_TOKEN = os.environ["NOTION_TOKEN"]
-
-
 notion = Client(
-    auth=NOTION_TOKEN
+    auth=os.environ["NOTION_TOKEN"]
 )
 
 
 SYNC_FILE = "synced_posts.txt"
 
 
-# =========================
-# Load synced URLs
-# =========================
 
 if os.path.exists(SYNC_FILE):
 
-    with open(SYNC_FILE, "r", encoding="utf-8") as f:
-
+    with open(SYNC_FILE, encoding="utf-8") as f:
         synced_posts = set(
             x.strip()
             for x in f.readlines()
         )
 
 else:
-
     synced_posts = set()
 
 
 
-# =========================
-# Fetch RSS
-# =========================
-
 def fetch_feed(url):
 
-    print("Fetching RSS:", url)
-
-
     headers = {
-
         "User-Agent":
-        "Mozilla/5.0 (X11; Linux x86_64)",
-
+        "Mozilla/5.0",
         "Accept":
-        "application/rss+xml, application/xml, text/xml"
-
+        "application/rss+xml,text/xml"
     }
 
 
     response = requests.get(
-
         url,
-
         headers=headers,
-
         timeout=30
-
     )
 
 
-    print(
-        "HTTP:",
-        response.status_code
-    )
+    print("HTTP:", response.status_code)
 
 
-    print(
-        "Content:",
-        response.text[:100]
-    )
+    if response.status_code != 200:
+
+        print(
+            "Skip RSS:",
+            url
+        )
+
+        return None
 
 
     return feedparser.parse(
@@ -93,11 +73,36 @@ def fetch_feed(url):
 
 
 
-# =========================
-# Create Notion Page
-# =========================
+def convert_date(post):
+
+    raw = post.get(
+        "published"
+    )
+
+
+    if not raw:
+        return datetime.utcnow().isoformat()
+
+
+    try:
+
+        dt = parsedate_to_datetime(
+            raw
+        )
+
+        return dt.isoformat()
+
+
+    except Exception:
+
+        return datetime.utcnow().isoformat()
+
+
 
 def create_post(post, source):
+
+
+    published = convert_date(post)
 
 
     print(
@@ -106,19 +111,10 @@ def create_post(post, source):
     )
 
 
-    published = post.get(
-        "published",
-        datetime.now().isoformat()
-    )
-
-
     notion.pages.create(
 
         parent={
-
-            "database_id":
-            DATABASE_ID
-
+            "database_id": DATABASE_ID
         },
 
 
@@ -130,14 +126,10 @@ def create_post(post, source):
                 "title": [
 
                     {
-
                         "text": {
-
                             "content":
                             post.title
-
                         }
-
                     }
 
                 ]
@@ -170,67 +162,22 @@ def create_post(post, source):
                 "rich_text": [
 
                     {
-
                         "text": {
 
                             "content":
                             source
 
                         }
-
                     }
 
                 ]
 
             }
 
-
-        },
-
-
-        children=[
-
-            {
-
-                "object":
-                "block",
-
-                "type":
-                "paragraph",
-
-                "paragraph": {
-
-                    "rich_text": [
-
-                        {
-
-                            "text": {
-
-                                "content":
-                                post.get(
-                                    "summary",
-                                    ""
-                                )[:1500]
-
-                            }
-
-                        }
-
-                    ]
-
-                }
-
-            }
-
-        ]
+        }
 
     )
 
-
-
-# =========================
-# Main sync
-# =========================
 
 
 for rss_url in RSS_URLS:
@@ -238,43 +185,31 @@ for rss_url in RSS_URLS:
 
     print("====================")
 
+    print(
+        "Fetching:",
+        rss_url
+    )
+
 
     feed = fetch_feed(
         rss_url
     )
 
 
+    if feed is None:
+        continue
+
+
     print(
-        "Found posts:",
+        "Found:",
         len(feed.entries)
     )
-
-
-    print(
-        "Feed error:",
-        feed.bozo
-    )
-
-
-    if feed.bozo:
-
-        print(
-            feed.bozo_exception
-        )
-
 
 
     for post in feed.entries:
 
 
-        print(
-            "Checking:",
-            post.title
-        )
-
-
         if post.link in synced_posts:
-
 
             print(
                 "Skip:",
@@ -287,7 +222,6 @@ for rss_url in RSS_URLS:
 
         try:
 
-
             create_post(
                 post,
                 rss_url
@@ -299,14 +233,7 @@ for rss_url in RSS_URLS:
             )
 
 
-            print(
-                "Done:",
-                post.title
-            )
-
-
         except Exception as e:
-
 
             print(
                 "ERROR:",
@@ -315,26 +242,17 @@ for rss_url in RSS_URLS:
 
 
 
-# =========================
-# Save state
-# =========================
-
-
 with open(
     SYNC_FILE,
     "w",
     encoding="utf-8"
 ) as f:
 
-
-    for url in sorted(
-        synced_posts
-    ):
+    for url in synced_posts:
 
         f.write(
             url + "\n"
         )
-
 
 
 print(
