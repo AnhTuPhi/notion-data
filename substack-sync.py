@@ -48,6 +48,20 @@ DATABASE_ID = os.environ["DATABASE_ID"]
 notion = Client(auth=os.environ["NOTION_TOKEN"])
 
 
+def get_data_source_id():
+    db = notion.databases.retrieve(database_id=DATABASE_ID)
+    sources = db.get("data_sources") or []
+    if not sources:
+        raise RuntimeError(
+            f"Database {DATABASE_ID} has no data_sources. "
+            "Make sure the integration has access and the API version supports data sources."
+        )
+    return sources[0]["id"]
+
+
+DATA_SOURCE_ID = get_data_source_id()
+
+
 BROWSER_HEADERS = {
     "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -173,7 +187,7 @@ def convert_date(published):
 def create_post(post):
     print("Creating:", post["title"])
     notion.pages.create(
-        parent={"database_id": DATABASE_ID},
+        parent={"data_source_id": DATA_SOURCE_ID},
         properties={
             "Title": {
                 "title": [
@@ -193,10 +207,10 @@ def purge_database():
     count = 0
     cursor = None
     while True:
-        kwargs = {"database_id": DATABASE_ID, "page_size": 100}
+        kwargs = {"data_source_id": DATA_SOURCE_ID, "page_size": 100}
         if cursor:
             kwargs["start_cursor"] = cursor
-        resp = notion.databases.query(**kwargs)
+        resp = notion.data_sources.query(**kwargs)
         for page in resp["results"]:
             try:
                 notion.pages.update(page_id=page["id"], archived=True)
