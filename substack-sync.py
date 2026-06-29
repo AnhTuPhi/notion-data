@@ -62,6 +62,21 @@ def get_data_source_id():
 DATA_SOURCE_ID = get_data_source_id()
 
 
+if WARP_PROXY:
+    print(f"Using WARP proxy: {WARP_PROXY}")
+else:
+    print("No WARP_PROXY set; using direct connection")
+
+
+WARP_PROXY = os.environ.get("WARP_PROXY", "").strip() or None
+
+
+def _proxies():
+    if WARP_PROXY:
+        return {"http": WARP_PROXY, "https": WARP_PROXY}
+    return None
+
+
 BROWSER_HEADERS = {
     "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -80,6 +95,14 @@ BROWSER_HEADERS = {
 }
 
 
+def _peek(content):
+    try:
+        text = content.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+    return text[:200].replace("\n", " ")
+
+
 def try_curl_cffi(url):
     try:
         r = cf_requests.get(
@@ -87,10 +110,11 @@ def try_curl_cffi(url):
             headers=BROWSER_HEADERS,
             impersonate="chrome124",
             timeout=30,
+            proxies=_proxies(),
         )
         if r.status_code == 200:
             return r.content
-        print(f"  curl_cffi HTTP {r.status_code}")
+        print(f"  curl_cffi HTTP {r.status_code} | {_peek(r.content)}")
     except Exception as e:
         print(f"  curl_cffi error: {e}")
     return None
@@ -99,10 +123,15 @@ def try_curl_cffi(url):
 def try_cloudscraper(url):
     try:
         scraper = cloudscraper.create_scraper()
-        r = scraper.get(url, headers=BROWSER_HEADERS, timeout=30)
+        r = scraper.get(
+            url,
+            headers=BROWSER_HEADERS,
+            timeout=30,
+            proxies=_proxies(),
+        )
         if r.status_code == 200:
             return r.content
-        print(f"  cloudscraper HTTP {r.status_code}")
+        print(f"  cloudscraper HTTP {r.status_code} | {_peek(r.content)}")
     except Exception as e:
         print(f"  cloudscraper error: {e}")
     return None

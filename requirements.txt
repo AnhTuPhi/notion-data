@@ -3,3 +3,5 @@ notion-client
 python-dotenv
 curl_cffi
 cloudscraper
+PySocks
+requests[socks]

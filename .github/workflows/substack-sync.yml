@@ -10,13 +10,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install
+
+      - name: Install Cloudflare WARP
         run: |
-          pip install -r requirements.txt
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+            | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install -y cloudflare-warp
+
+      - name: Start WARP in proxy mode
+        run: |
+          # warp-svc is auto-started by the package; give it a moment
+          sleep 3
+          sudo systemctl is-active warp-svc || sudo systemctl start warp-svc
+          sleep 2
+
+          warp-cli --accept-tos registration new
+          warp-cli --accept-tos mode proxy
+          warp-cli --accept-tos proxy port 40000
+          warp-cli --accept-tos connect
+
+          # wait for tunnel up
+          for i in {1..15}; do
+            status=$(warp-cli --accept-tos status || true)
+            echo "warp status: $status"
+            echo "$status" | grep -q "Connected" && break
+            sleep 2
+          done
+
+          # Verify exit IP is via Cloudflare
+          echo "=== Direct IP (no proxy) ==="
+          curl -s https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|warp)='
+          echo "=== WARP exit IP ==="
+          curl -s --socks5-hostname 127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|warp)='
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
 
       - name: Sync
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           DATABASE_ID: ${{ secrets.DATABASE_ID }}
-        run:
-          python substack-sync.py
+          WARP_PROXY: socks5h://127.0.0.1:40000
+        run: python substack-sync.py
