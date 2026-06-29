@@ -1,7 +1,10 @@
 import os
-import requests
+import json
+import time
 import feedparser
+import cloudscraper
 
+from curl_cffi import requests as cf_requests
 from notion_client import Client
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -20,7 +23,6 @@ RSS_URLS = [
     "https://architecturenotes.co/feed",
     "https://substack.changngocgia.com/feed",
     "https://dantech.substack.com/feed",
-    "https://blackswain.substack.com/feed",
     "https://cuonganhecowriter.substack.com/feed",
     "https://taichinhnguocdoi.substack.com/feed",
     "https://www.uptrend.vn/feed",
@@ -35,236 +37,209 @@ RSS_URLS = [
     "https://vyvo.substack.com/feed",
     "https://mrpcfun.substack.com/feed",
     "https://vutr.substack.com/feed",
-    "https://zoedatalens.substack.com/feed",
     "https://vutuyen.substack.com/feed",
     "https://vnwyckoffclub.substack.com/feed",
     "https://vnhacker.substack.com/feed",
-    "https://vohoanghac.com/feed"
 ]
 
 
 DATABASE_ID = os.environ["DATABASE_ID"]
 
-notion = Client(
-    auth=os.environ["NOTION_TOKEN"]
-)
+notion = Client(auth=os.environ["NOTION_TOKEN"])
 
 
-SYNC_FILE = "synced_posts.txt"
+BROWSER_HEADERS = {
+    "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36",
+    "Accept":
+        "application/rss+xml, application/xml;q=0.9, "
+        "text/xml;q=0.8, */*;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+}
 
 
-
-if os.path.exists(SYNC_FILE):
-
-    with open(SYNC_FILE, encoding="utf-8") as f:
-        synced_posts = set(
-            x.strip()
-            for x in f.readlines()
-        )
-
-else:
-    synced_posts = set()
-
-
-
-def fetch_feed(url):
-
-    headers = {
-        "User-Agent":
-        "Mozilla/5.0",
-        "Accept":
-        "application/rss+xml,text/xml"
-    }
-
-
-    response = requests.get(
-        url,
-        headers=headers,
-        timeout=30
-    )
-
-
-    print("HTTP:", response.status_code)
-
-
-    if response.status_code != 200:
-
-        print(
-            "Skip RSS:",
-            url
-        )
-
-        return None
-
-
-    return feedparser.parse(
-        response.content
-    )
-
-
-
-def convert_date(post):
-
-    raw = post.get(
-        "published"
-    )
-
-
-    if not raw:
-        return datetime.utcnow().isoformat()
-
-
+def try_curl_cffi(url):
     try:
-
-        dt = parsedate_to_datetime(
-            raw
+        r = cf_requests.get(
+            url,
+            headers=BROWSER_HEADERS,
+            impersonate="chrome124",
+            timeout=30,
         )
+        if r.status_code == 200:
+            return r.content
+        print(f"  curl_cffi HTTP {r.status_code}")
+    except Exception as e:
+        print(f"  curl_cffi error: {e}")
+    return None
 
-        return dt.isoformat()
+
+def try_cloudscraper(url):
+    try:
+        scraper = cloudscraper.create_scraper()
+        r = scraper.get(url, headers=BROWSER_HEADERS, timeout=30)
+        if r.status_code == 200:
+            return r.content
+        print(f"  cloudscraper HTTP {r.status_code}")
+    except Exception as e:
+        print(f"  cloudscraper error: {e}")
+    return None
 
 
-    except Exception:
+def normalize_feedparser(feed):
+    posts = []
+    for e in feed.entries:
+        link = e.get("link", "")
+        if not link:
+            continue
+        posts.append({
+            "title": e.get("title", "(untitled)"),
+            "link": link,
+            "published": e.get("published", ""),
+        })
+    return posts
 
+
+def normalize_substack_api(content):
+    data = json.loads(content)
+    posts = []
+    for p in data:
+        link = p.get("canonical_url") or p.get("url", "")
+        if not link:
+            continue
+        posts.append({
+            "title": p.get("title", "(untitled)"),
+            "link": link,
+            "published": p.get("post_date") or "",
+        })
+    return posts
+
+
+def fetch_posts(url):
+    # Tier 1+2: full browser headers + curl_cffi (Chrome TLS impersonation)
+    content = try_curl_cffi(url)
+    if content:
+        feed = feedparser.parse(content)
+        if feed.entries:
+            return normalize_feedparser(feed)
+        print("  curl_cffi: empty feed")
+
+    # Tier 3: cloudscraper (handles older CF JS challenge)
+    content = try_cloudscraper(url)
+    if content:
+        feed = feedparser.parse(content)
+        if feed.entries:
+            return normalize_feedparser(feed)
+        print("  cloudscraper: empty feed")
+
+    # Fallback: Substack archive JSON API (only for *.substack.com)
+    if ".substack.com" in url:
+        base = url.rsplit("/feed", 1)[0]
+        api = f"{base}/api/v1/archive?sort=new&limit=20"
+        print(f"  fallback API: {api}")
+        content = try_curl_cffi(api)
+        if content:
+            try:
+                return normalize_substack_api(content)
+            except Exception as e:
+                print(f"  api parse error: {e}")
+
+    return None
+
+
+def convert_date(published):
+    if not published:
         return datetime.utcnow().isoformat()
-
+    try:
+        return parsedate_to_datetime(published).isoformat()
+    except Exception:
+        pass
+    try:
+        return datetime.fromisoformat(
+            published.replace("Z", "+00:00")
+        ).isoformat()
+    except Exception:
+        return datetime.utcnow().isoformat()
 
 
 def create_post(post):
-
-
-    published = convert_date(post)
-
-
-    print(
-        "Creating:",
-        post.title
-    )
-
-
+    print("Creating:", post["title"])
     notion.pages.create(
-
-        parent={
-            "database_id": DATABASE_ID
-        },
-
-
+        parent={"database_id": DATABASE_ID},
         properties={
-
-
             "Title": {
-
                 "title": [
-
-                    {
-                        "text": {
-                            "content":
-                            post.title
-                        }
-                    }
-
+                    {"text": {"content": post["title"]}}
                 ]
-
             },
-
-
-            "URL": {
-
-                "url":
-                post.link
-
-            },
-
-
+            "URL": {"url": post["link"]},
             "Published": {
-
-                "date": {
-
-                    "start":
-                    published
-
-                }
-
-            }
-        }
-
+                "date": {"start": convert_date(post["published"])}
+            },
+        },
     )
 
 
+def purge_database():
+    print("Archiving existing pages in Notion DB...")
+    count = 0
+    cursor = None
+    while True:
+        kwargs = {"database_id": DATABASE_ID, "page_size": 100}
+        if cursor:
+            kwargs["start_cursor"] = cursor
+        resp = notion.databases.query(**kwargs)
+        for page in resp["results"]:
+            try:
+                notion.pages.update(page_id=page["id"], archived=True)
+                count += 1
+            except Exception as e:
+                print(f"  archive error on {page['id']}: {e}")
+        if not resp.get("has_more"):
+            break
+        cursor = resp.get("next_cursor")
+    print(f"Archived {count} pages")
+
+
+purge_database()
+
+
+seen_links = set()
 
 for rss_url in RSS_URLS:
 
-
     print("====================")
+    print("Fetching:", rss_url)
 
-    print(
-        "Fetching:",
-        rss_url
-    )
+    posts = fetch_posts(rss_url)
 
-
-    feed = fetch_feed(
-        rss_url
-    )
-
-
-    if feed is None:
+    if posts is None:
+        print("Skip (all tiers failed):", rss_url)
         continue
 
+    print("Found:", len(posts))
 
-    print(
-        "Found:",
-        len(feed.entries)
-    )
+    for post in posts:
 
-
-    for post in feed.entries:
-
-
-        if post.link in synced_posts:
-
-            print(
-                "Skip:",
-                post.title
-            )
-
+        if post["link"] in seen_links:
+            print("Dup skip:", post["title"])
             continue
 
-
-
         try:
-
-            create_post(
-                post
-            )
-
-
-            synced_posts.add(
-                post.link
-            )
-
-
+            create_post(post)
+            seen_links.add(post["link"])
         except Exception as e:
+            print("ERROR:", e)
 
-            print(
-                "ERROR:",
-                e
-            )
+    time.sleep(1)
 
 
-
-with open(
-    SYNC_FILE,
-    "w",
-    encoding="utf-8"
-) as f:
-
-    for url in synced_posts:
-
-        f.write(
-            url + "\n"
-        )
-
-
-print(
-    "Sync completed"
-)
+print("Sync completed:", len(seen_links), "posts")
