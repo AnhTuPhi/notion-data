@@ -481,7 +481,9 @@ def create_post(post):
         }
 
     if post.get("source"):
-        properties["Source"] = {"select": {"name": post["source"][:100]}}
+        source_clean = post["source"].replace(",", "").strip()[:100]
+        if source_clean:
+            properties["Source"] = {"select": {"name": source_clean}}
 
     args = {
         "parent": {"data_source_id": DATA_SOURCE_ID},
