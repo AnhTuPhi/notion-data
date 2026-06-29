@@ -62,12 +62,6 @@ def get_data_source_id():
 DATA_SOURCE_ID = get_data_source_id()
 
 
-if WARP_PROXY:
-    print(f"Using WARP proxy: {WARP_PROXY}")
-else:
-    print("No WARP_PROXY set; using direct connection")
-
-
 WARP_PROXY = os.environ.get("WARP_PROXY", "").strip() or None
 
 
@@ -75,6 +69,12 @@ def _proxies():
     if WARP_PROXY:
         return {"http": WARP_PROXY, "https": WARP_PROXY}
     return None
+
+
+if WARP_PROXY:
+    print(f"Using WARP proxy: {WARP_PROXY}")
+else:
+    print("No WARP_PROXY set; using direct connection")
 
 
 BROWSER_HEADERS = {
